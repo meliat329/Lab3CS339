@@ -2,15 +2,15 @@ package simpledb;
 import java.lang.Math;
 import java.util.Arrays;
 
-import org.graalvm.compiler.asm.amd64.AMD64Assembler.VexFloatCompareOp.Predicate;
 
 /** A class to represent a fixed-width histogram over a single integer-based field.
  */
 public class IntHistogram {
     private int[] hist;
     private double width;
-    private int minVal;
+    private final int minVal;
     private int nTups;
+    private int maxVal;
 
 
     /**
@@ -39,6 +39,7 @@ public class IntHistogram {
 
         hist = new int[buckets];
         minVal = min;
+        maxVal = max;
         nTups = 0;
     }
 
@@ -69,20 +70,33 @@ public class IntHistogram {
      * @return Predicted selectivity of this particular operator and value
      */
     public double estimateSelectivity(Predicate.Op op, int v) {
+        boolean outOfRange = false;
+        if (v < minVal || v >maxVal) {
+            outOfRange = true;
+            if (v < minVal) {
+                v = minVal;
+            } else v = maxVal;
+        }
         int b = getBucket(v);
         double sel = -1;  // if this is returned, we got a problem
 
         if (op == Predicate.Op.EQUALS || op == Predicate.Op.LIKE || op == Predicate.Op.NOT_EQUALS) {
-            sel = (hist[b] / width) / nTups;
+            if (outOfRange) {
+                sel = 0;
+            }
+            else sel = (hist[b] / width) / nTups;
             if (op == Predicate.Op.NOT_EQUALS) {
                 return 1 - sel;
             }
             else return sel;
         }
         else if (op == Predicate.Op.GREATER_THAN || op == Predicate.Op.GREATER_THAN_OR_EQ) {
+            if (outOfRange && v == maxVal) {
+                return 0;
+            }
             double b_f = b_fraction(b);
             double b_part = (b_right(b) - v) / width;
-            if (op == Predicate.Op.GREATER_THAN) {
+            if (op == Predicate.Op.GREATER_THAN && !outOfRange) {
                 b_part = (b_right(b) - v + 1) / width;
                 // so as not to include values for v
             }
@@ -94,10 +108,13 @@ public class IntHistogram {
             return sel;
         }
         else if (op == Predicate.Op.LESS_THAN || op == Predicate.Op.LESS_THAN_OR_EQ) {
+            if (outOfRange && v == minVal) {
+                return 0;
+            }
             double b_f = b_fraction(b);
-            double b_part = (b_left(b) - v) / width;
-            if (op == Predicate.Op.LESS_THAN) {
-                b_part = (b_left(b) - v + 1) / width;
+            double b_part = (v - b_left(b)+ 1) / width;
+            if (op == Predicate.Op.LESS_THAN && !outOfRange) {
+                b_part = (v - b_left(b)) / width;
                 // so as not to include values for v
             }
 
