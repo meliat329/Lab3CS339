@@ -5,6 +5,8 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import jdk.internal.jshell.tool.resources.l10n;
+
 /**
  * TableStats represents statistics (e.g., histograms) about base tables in a
  * query. 
@@ -66,6 +68,11 @@ public class TableStats {
      */
     static final int NUM_HIST_BINS = 100;
 
+
+    private int ioPerPage;
+    private Object[] hists;
+    private int totalTups;
+
     /**
      * Create a new TableStats object, that keeps track of statistics on each
      * column of a table
@@ -85,6 +92,120 @@ public class TableStats {
         // necessarily have to (for example) do everything
         // in a single scan of the table.
         // some code goes here
+
+
+        // get the DbFile for the table in question
+        DbFile f = Database.getCatalog().getDatabaseFile(tableid);
+        // DbFile iterator needs a tid
+        TransactionId tid = new TransactionId();
+        
+        TupleDesc td = f.getTupleDesc();
+        
+        int numFields = td.numFields();
+        hists = new Object[numFields];
+        makeHistograms(f, tid, td, hists);
+        fillHistograms(f, tid, td, hists);
+
+        ioPerPage = ((HeapFile) f).numPages() * ioCostPerPage;
+        
+
+    }
+
+    // could be int or string; if int, we need to get the mins and maxes.
+    // if str, we call stringHistogram, which gets the mins and maxes itself.
+    private void makeHistograms(DbFile f, TransactionId tid, TupleDesc td, Object[] hists) {
+        DbFileIterator iter = f.iterator(tid);
+        // storing hists
+        
+        int numFields = td.numFields();
+        
+        try {
+            iter.open();
+
+            
+            // just using arrays because these are intuitive to me
+            int[] min = new int[numFields];
+            int[] max = new int[numFields]; 
+            for(int i = 0; i<numFields; i++) {
+                // set up initial values for greedy algo
+                min[i] = Integer.MAX_VALUE;
+                max[i] = Integer.MIN_VALUE;
+            }
+
+
+            while (iter.hasNext()){
+                Tuple next = iter.next();
+                totalTups++;
+
+                for(int i = 0; i< numFields; i++) {
+                    if (td.getFieldType(i) == Type.INT_TYPE) {
+                        Field field = next.getField(i);
+                        // must be cast as intfield to get the value, and we can do this because we know
+                        // from above that it's intType
+                        int value = ((IntField) field).getValue();
+                        if (value < min[i]) {
+                            min[i] = value;
+                        }
+                        else if (value > max[i]) {
+                            max[i] = value;
+                        }
+
+                    } // we don't do anything if it's a string
+                }
+                
+            }
+
+            iter.close();
+
+            for(int i = 0; i< numFields; i++) {
+                if(td.getFieldType(i) == Type.INT_TYPE) {
+                    hists[i] = new IntHistogram(NUM_HIST_BINS, min[i], max[i]);
+                }
+                else {
+                    hists[i] = new StringHistogram(NUM_HIST_BINS);
+                }
+            }
+
+        } catch (Exception e) { 
+            e.printStackTrace();
+        }
+    }
+
+    private void fillHistograms(DbFile f, TransactionId tid, TupleDesc td, Object[] hists) {
+        DbFileIterator iter = f.iterator(tid);
+
+        int numFields = td.numFields();
+        try {
+            iter.open();
+
+            while (iter.hasNext()){
+                Tuple next = iter.next();
+
+                for(int i = 0; i< numFields; i++) {
+                    if (td.getFieldType(i) == Type.INT_TYPE) {
+                        Field field = next.getField(i);
+                        // must be cast as intfield to get the value, and we can do this because we know
+                        // from above that it's intType
+                        int value = ((IntField) field).getValue();
+                        IntHistogram h = (IntHistogram) hists[i];
+                        h.addValue(value);
+                
+                    } else { // string hist
+                        Field field = next.getField(i);
+                        String value = ((StringField) field).getValue();
+                        StringHistogram h = (StringHistogram) hists[i];
+                        h.addValue(value);
+                    }
+                }
+                
+            }
+
+            iter.close();
+
+        } catch (Exception e) { 
+            e.printStackTrace();
+        }
+
     }
 
     /**
@@ -101,7 +222,7 @@ public class TableStats {
      */
     public double estimateScanCost() {
         // some code goes here
-        return 0;
+        return ioPerPage;
     }
 
     /**
@@ -115,7 +236,7 @@ public class TableStats {
      */
     public int estimateTableCardinality(double selectivityFactor) {
         // some code goes here
-        return 0;
+        return (int) (totalTups * selectivityFactor);
     }
 
     /**
@@ -148,7 +269,17 @@ public class TableStats {
      */
     public double estimateSelectivity(int field, Predicate.Op op, Field constant) {
         // some code goes here
-        return 1.0;
+        Object hist = hists[field];
+        Type t = constant.getType();
+        if(t == Type.INT_TYPE) {
+            IntHistogram h = ((IntHistogram) hist);
+            int value = ((IntField) constant).getValue();
+            return h.estimateSelectivity(op, value);
+        } else {
+            StringHistogram h = ((StringHistogram) hist);
+            String value = ((StringField) constant).getValue();
+            return h.estimateSelectivity(op, value);
+        }
     }
 
     /**
@@ -156,7 +287,7 @@ public class TableStats {
      * */
     public int totalTuples() {
         // some code goes here
-        return 0;
+        return this.totalTups;
     }
 
 }

@@ -32,7 +32,7 @@ public class IntHistogram {
     public IntHistogram(int buckets, int min, int max) {
         width = ((double) (max - min + 1))/buckets;
         if (width < 1) {
-            buckets = max-min;  
+            buckets = max-min+1;
             // if we get bigger buckets value but max and min of, say, 0 and 1, we only need max - min buckets
         }
         width = Math.max(1, width); // can't have width <1 bc we are working with ints
@@ -70,34 +70,33 @@ public class IntHistogram {
      * @return Predicted selectivity of this particular operator and value
      */
     public double estimateSelectivity(Predicate.Op op, int v) {
-        boolean outOfRange = false;
-        if (v < minVal || v >maxVal) {
-            outOfRange = true;
-            if (v < minVal) {
-                v = minVal;
-            } else v = maxVal;
-        }
-        int b = getBucket(v);
+
+
         double sel = -1;  // if this is returned, we got a problem
 
         if (op == Predicate.Op.EQUALS || op == Predicate.Op.LIKE || op == Predicate.Op.NOT_EQUALS) {
-            if (outOfRange) {
+
+            if (v < minVal || v > maxVal) {
                 sel = 0;
+                if (op == Predicate.Op.NOT_EQUALS) return 1;
+                else return sel;
             }
-            else sel = (hist[b] / width) / nTups;
+            int b = getBucket(v);
+            sel = (hist[b] / width) / nTups;
             if (op == Predicate.Op.NOT_EQUALS) {
                 return 1 - sel;
             }
             else return sel;
         }
         else if (op == Predicate.Op.GREATER_THAN || op == Predicate.Op.GREATER_THAN_OR_EQ) {
-            if (outOfRange && v == maxVal) {
+            if (v >= maxVal) {
                 return 0;
-            }
+            } else if (v < minVal) return 1;
+            int b = getBucket(v);
             double b_f = b_fraction(b);
             double b_part = (b_right(b) - v) / width;
-            if (op == Predicate.Op.GREATER_THAN && !outOfRange) {
-                b_part = (b_right(b) - v + 1) / width;
+            if (op == Predicate.Op.GREATER_THAN) {
+                b_part = (b_right(b) - v - 1) / width;
                 // so as not to include values for v
             }
 
@@ -108,12 +107,13 @@ public class IntHistogram {
             return sel;
         }
         else if (op == Predicate.Op.LESS_THAN || op == Predicate.Op.LESS_THAN_OR_EQ) {
-            if (outOfRange && v == minVal) {
+            if (v < minVal) {
                 return 0;
-            }
+            } else if (v >= maxVal) return 1;
+            int b = getBucket(v);
             double b_f = b_fraction(b);
             double b_part = (v - b_left(b)+ 1) / width;
-            if (op == Predicate.Op.LESS_THAN && !outOfRange) {
+            if (op == Predicate.Op.LESS_THAN ) {
                 b_part = (v - b_left(b)) / width;
                 // so as not to include values for v
             }
