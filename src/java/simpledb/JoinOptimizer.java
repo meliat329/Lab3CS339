@@ -111,7 +111,10 @@ public class JoinOptimizer {
             // HINT: You may need to use the variable "j" if you implemented
             // a join algorithm that's more complicated than a basic
             // nested-loops join.
-            return -1.0;
+            // per handout:
+            // joincost(t1 join t2) = scancost(t1) + ntups(t1) x scancost(t2) //IO cost
+            //                          + ntups(t1) x ntups(t2)  //CPU cost
+            return cost1 + card1 * cost2 + card1 * card2;
         }
     }
 
@@ -155,8 +158,27 @@ public class JoinOptimizer {
             String field2PureName, int card1, int card2, boolean t1pkey,
             boolean t2pkey, Map<String, TableStats> stats,
             Map<String, Integer> tableAliasToId) {
-        int card = 1;
+        int card = 0;
         // some code goes here
+
+        // per handout:
+        // For equality joins, when one of the attributes is a primary key, the number of tuples
+        // produced by the join cannot be larger than the cardinality of the non-primary key attribute.
+        //      i.e., if t1pkey, card <= card2 and vice versa
+        if(joinOp == Predicate.Op.EQUALS) {
+            if(t1pkey){
+                card = card2;
+            } else if(t2pkey) card = card1;
+            // For equality joins when there is no primary key... it's fine to make up a simple heuristic
+            // (say, the size of the larger of the two tables)
+            else {
+                card = Math.max(card1, card2);
+            }
+        } // For range scans, ... It is fine to assume that a fixed fraction of the cross-product is
+          // emitted by range scans (say, 30%).
+        else {
+            card = (int) (0.3*card1*card2);
+        }
         return card <= 0 ? 1 : card;
     }
 

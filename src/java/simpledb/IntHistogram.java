@@ -112,7 +112,7 @@ public class IntHistogram {
             } else if (v >= maxVal) return 1;
             int b = getBucket(v);
             double b_f = b_fraction(b);
-            double b_part = (v - b_left(b)+ 1) / width;
+            double b_part = (v - b_left(b) +1) / width;
             if (op == Predicate.Op.LESS_THAN ) {
                 b_part = (v - b_left(b)) / width;
                 // so as not to include values for v
