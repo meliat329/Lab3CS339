@@ -246,7 +246,42 @@ public class JoinOptimizer {
 
         // some code goes here
         //Replace the following
-        return joins;
+    	
+    	//initialize cache and set
+    	PlanCache bpc = new PlanCache();
+    	Set<LogicalJoinNode> set = null;
+    	
+    	//go through the subsets
+    	for (int i= 1; i <= joins.size(); i++) {
+    		for (Set<LogicalJoinNode> x : enumerateSubsets(joins, i)) {
+    			if ( i == joins.size()) set = x;
+    			
+    			CostCard best = null;
+    			for (LogicalJoinNode y : x) {
+    				CostCard curr = null;
+    				if (best == null) {
+    					curr = computeCostAndCardOfSubplan(stats, filterSelectivities, y, x, Double.MAX_VALUE, bpc);
+    				}
+    				else {
+    					curr = computeCostAndCardOfSubplan(stats, filterSelectivities, y, x, best.cost, bpc);
+    				}
+    				if (curr != null) {
+    					best = curr;
+    				}
+    			}
+    			if (best == null) {
+    				bpc.addPlan(x, Double.MAX_VALUE, Integer.MAX_VALUE, null);
+    				}
+    			else {
+    				bpc.addPlan(x, best.cost, best.card, best.plan);
+    			}
+    			}
+    	}
+    	Vector<LogicalJoinNode> returnvec = bpc.getOrder(set);
+        if (explain) {
+        	printJoins(returnvec, bpc, stats, filterSelectivities);
+        }
+        return returnvec;
     }
 
     // ===================== Private Methods =================================
